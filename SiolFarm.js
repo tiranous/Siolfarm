@@ -1060,64 +1060,68 @@ window.FarmGod.Main = (function (Library, Translation) {
 
 // boot
 (function(){ window.FarmGod.Main.init(); })();
-/* FarmGod – Trim V3 — Part 3/3 (New Barbs Add‑On)
- * by Vasia & Ethical Hacker GPT
+/* FarmGod – Trim V3 — Part 3/3 (New Barbs Add‑On) — clean v2
+ * by Vasia & Siolinio & Ethical Hacker GPT
  *
- * Adds a button "Add new barbs" next to Trim in the Options dialog.
- * When clicked, it builds a list ONLY with barbarian villages from /map/village.txt
- * that are NOT already in the plunder list (Farm Assistant) — i.e., truly new.
- *
- * Features:
- * - Strict availability: checks origin pool against Farm Assistant Template B (fallback to A if B missing).
- * - Skips targets that already have outgoing attacks (commands overview).
- * - De-duplication: 1 target total, keeps closest origin.
- * - ENTER on this list sends Template B/A immediately via Account Manager (no Rally popup), removing the row.
- * - "Rebuild New Barbs" button to refresh only this view.
- * - Non-intrusive: does not modify existing Trim/AutoClose/Enter logic—uses capture-phase ENTER to take priority only when New Barbs rows are present.
+ * This file is a SAFE rewrite of Part 3 with stricter syntax (no stray parens),
+ * same features as before + the Trim loader typewriter + Trim table polish.
+ * It is designed to coexist; it checks for existing hooks before attaching.
  */
 
 (function(NewBarbs){
-  var lib = window.FarmGod && window.FarmGod.Library;
-  if (!lib) return console.warn('FarmGod Library missing — load Part 1/2 first');
+  'use strict';
 
-  // ------- helpers -------
+  // ---- Guards ----
+  if (!window.FarmGod || !window.FarmGod.Library) {
+    console.warn('FarmGod Library missing — load Part 1/2 first');
+    return;
+  }
+  var lib = window.FarmGod.Library;
+
+  // ---- Small utils ----
   function clamp(n, min, max){ n = parseInt(n,10); if(!isFinite(n)) n=min; return Math.max(min, Math.min(max, n)); }
   function toNumber(x){ var v = parseFloat(x); return isFinite(v)?v:0; }
   function coordOf(str){ var m=(String(str).match(/\d{1,3}\|\d{1,3}/)||[null])[0]; return m||null; }
+  function poolSatisfies(pool, needByName){ for (var u in needByName){ if(!needByName.hasOwnProperty(u)) continue; var req=needByName[u]||0; if(req>0 && (pool[u]||0) < req) return false; } return true; }
 
-  // Attach button next to Trim when Options dialog renders
-  function injectAddButton(){
-    var $trim = $('.trimButton');
-    if ($trim.length && !$('.newbarbsButton').length){
-      $('<button class="newbarbsButton btn" style="margin-left:8px">Add new barbs</button>').insertAfter($trim);
-      // flag last action for loader routing
-      $('.trimButton').off('mousedown.fgflag').on('mousedown.fgflag', function(){ window.FarmGod.__lastAction = 'trim'; });
-      $('.newbarbsButton').off('mousedown.fgflag').on('mousedown.fgflag', function(){ window.FarmGod.__lastAction = 'newbarbs'; });
-      $('.newbarbsButton').off('click').on('click', function(){
-        var opts = JSON.parse(localStorage.getItem('farmGod_options')||'{}');
-        var group = parseInt(opts.optionGroup||0,10);
-        var distance = parseFloat(opts.optionDistance||25);
-        $('.optionsContent').html(UI.Throbber[0].outerHTML + '<br><br>');
-        runNewBarbsWith(group, distance);
-      });
-    }
+  // =====================================================
+  // Options enhancements (button + credits + defaults + UI)
+  // =====================================================
+  function enhanceOptionsUI(){
+    try {
+      var $opt = $('.optionsContent');
+      if (!$opt.length) return;
 
-    // ---- Options UI polish (non-destructive): hide three checkboxes + Plan farms, set default group to All, add credits
-    var $opt = $('.optionsContent');
-    if ($opt.length){
-      // Hide checkboxes
+      // Add New Barbs button next to Trim
+      var $trim = $opt.find('.trimButton');
+      if ($trim.length && !$opt.find('.newbarbsButton').length){
+        $('<button class="newbarbsButton btn" style="margin-left:8px">Add new barbs</button>')
+          .insertAfter($trim)
+          .on('mousedown.fgflag', function(){ window.FarmGod.__lastAction = 'newbarbs'; })
+          .on('click', function(){
+            var opts = JSON.parse(localStorage.getItem('farmGod_options')||'{}');
+            var group = parseInt(opts.optionGroup||0,10);
+            var distance = parseFloat(opts.optionDistance||25);
+            $('.optionsContent').html(UI.Throbber[0].outerHTML + '<br><br>');
+            runNewBarbsWith(group, distance);
+          });
+      }
+      // mark Trim action for loader
+      $opt.find('.trimButton').off('mousedown.fgflag').on('mousedown.fgflag', function(){ window.FarmGod.__lastAction = 'trim'; });
+
+      // Hide checkboxes + Plan farms (non-destructive)
       $opt.find('.optionLosses').closest('label').hide();
       $opt.find('.optionMaxloot').closest('label').hide();
       $opt.find('.optionNewbarbs').closest('label').hide();
-      // Hide Plan farms button
       $opt.find('.optionButton').hide();
-      // Focus Trim for usability
-      var $tb = $opt.find('.trimButton'); if ($tb.length) { try { $tb[0].focus(); } catch(_){} }
+
       // Credits bottom-right
       if (!$opt.find('.fg-credit').length){
-        $opt.append('<div class="fg-credit" style="text-align:right;margin-top:6px;opacity:.75">By Siolinio</div>');
+        var $cr = $('<div></div>').addClass('fg-credit').css({ textAlign:'right', marginTop:'6px', opacity:0.75 }).text('By Siolinio');
+        $opt.append($cr);
       }
-      // Default group: All (value=0 or text="all") once
+
+      // Default Group: All (value=0 or text=all) — set once
       var $sel = $opt.find('.optionGroup');
       if ($sel.length && !$sel.data('fg_set_all')){
         var selected=false;
@@ -1132,108 +1136,75 @@ window.FarmGod.Main = (function (Library, Translation) {
             var st = JSON.parse(localStorage.getItem('farmGod_options')||'{}');
             st.optionGroup = parseInt($sel.val(),10) || 0;
             localStorage.setItem('farmGod_options', JSON.stringify(st));
-          } catch(_){ }
+          } catch(_){ /* ignore */ }
         }
       }
 
-      // ---- Loader typing effect for Trim only
-      if ((window.FarmGod && window.FarmGod.__lastAction === 'trim') && !$opt.find('.fg-typing').length){
-        var htmlNow = ($opt.html()||'').toLowerCase();
-        if (htmlNow.indexOf('throbber')!==-1 || htmlNow.indexOf('ui.throbber')!==-1 || htmlNow.indexOf('<img')!==-1){
-          var msg = ' Siolinio did it again........';
-          var html = '<div class="fg-typing" style="display:flex;align-items:center;gap:10px;padding:6px 2px">'
-                   +   '<span class="fg-spin">'+ (UI.Throbber?UI.Throbber[0].outerHTML:'') +'</span>'
-                   +   '<span class="fg-type" style="font-family:monospace;white-space:pre;line-height:1.4"></span>'
-                   + '</div>';
-          $opt.html(html);
-          (function(){ var i=0; var t=$opt.find('.fg-type'); var tm=setInterval(function(){ t.text(msg.slice(0, ++i)); if(i>=msg.length) clearInterval(tm); }, 60); })();
+      // Loader typewriter for Trim
+      if (window.FarmGod && window.FarmGod.__lastAction === 'trim'){
+        if (!$opt.find('.fg-typing').length){
+          var $wrap = $('<div class="fg-typing"></div>').css({ display:'flex', alignItems:'center', gap:'10px', padding:'6px 2px' });
+          // keep spinner if present
+          if (window.UI && UI.Throbber && UI.Throbber.length){
+            var $spin = $(UI.Throbber[0].outerHTML);
+            $wrap.append($spin);
+          }
+          var $type = $('<span class="fg-type"></span>').css({ fontFamily:'monospace', whiteSpace:'pre', lineHeight:1.4 });
+          $wrap.append($type);
+          $opt.append($wrap);
+          (function(){ var i=0; var msg=' Siolinio did it again........'; var tm=setInterval(function(){ $type.text(msg.slice(0, ++i)); if(i>=msg.length) clearInterval(tm); }, 60); })();
         }
       }
-    }
+    } catch(e){ /* keep silent */ }
+  }
 
-    // ---- Trim table polish: colored dot + clickable Origin & Target (remove Go to col)
-    $('.farmGodContent').each(function(){
-      var $box=$(this); var $h=$box.find('> h3').first(); if(!$h.length) return;
-      if ($h.text().indexOf('Trim')!==-1){
+  // Observe DOM to enhance options and polish Trim table when they appear
+  function safeObserver(cb){
+    try { var mo = new MutationObserver(function(){ cb(); }); mo.observe(document.body, { childList:true, subtree:true }); return mo; }
+    catch(_){ setInterval(cb, 500); return null; }
+  }
+
+  // =====================================================
+  // Trim table polish (colored dot + clickable Origin/Target)
+  // =====================================================
+  function polishTrimTable(){
+    try {
+      var $wraps = $('.farmGodContent'); if(!$wraps.length) return;
+      $wraps.each(function(){
+        var $box=$(this); var $h=$box.find('> h3').first(); if(!$h.length) return;
+        if ($h.text().indexOf('Trim')===-1) return;
         var $table = $box.find('table.vis').first(); if(!$table.length || $table.data('fgPolished')) return;
-        // remove header "Go to" if present
-        $table.find('thead th').each(function(idx){ if ($(this).text().trim().toLowerCase()==='go to'){ $(this).remove(); } });
-        // transform rows
+        // locate Go to column index
+        var goToIdx=-1; $table.find('thead th').each(function(idx){ if ($(this).text().trim().toLowerCase()==='go to'){ goToIdx=idx; }});
+        if (goToIdx>-1){ $table.find('thead th').eq(goToIdx).remove(); }
         $table.find('tbody tr').each(function(){
-          var $tr=$(this); var $td=$tr.children('td'); if($td.length<6) return; // skip empty row
-          var $origin=$td.eq(0), $target=$td.eq(1), $fields=$td.eq(2), $color=$td.eq(3), $goto=$td.eq(4); // rally is 5
+          var $tr=$(this); var $td=$tr.children('td'); if(!$td.length) return;
+          if (goToIdx===-1 || $td.length<=goToIdx) return;
+          var $origin=$td.eq(0), $target=$td.eq(1), $color=$td.eq(3), $goto=$td.eq(goToIdx);
           var $links=$goto.find('a'); var originHref=$links.eq(0).attr('href'); var targetHref=$links.eq(1).attr('href');
-          if (originHref){ $origin.html('<a href="'+originHref+'" target="_blank">'+$origin.text()+'</a>'); }
-          if (targetHref){ $target.html('<a href="'+targetHref+'" target="_blank">'+$target.text()+'</a>'); }
-          var colorTxt=($.trim($color.text())||'').toLowerCase(); var col=(colorTxt.indexOf('red')!==-1)?'#e00000':'#ffcb00';
-          $color.html('<span title="'+colorTxt.toUpperCase()+'" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+col+';"></span>');
+          if (originHref){ var originText=$origin.text(); $origin.empty().append($('<a></a>').attr({ href: originHref, target:'_blank' }).text(originText)); }
+          if (targetHref){ var targetText=$target.text(); $target.empty().append($('<a></a>').attr({ href: targetHref, target:'_blank' }).text(targetText)); }
+          var colorTxt=$.trim($color.text()).toLowerCase(); var col=(colorTxt.indexOf('red')!==-1)?'#e00000':'#ffcb00';
+          $color.empty().append($('<span></span>').attr('title', colorTxt.toUpperCase()).css({ display:'inline-block', width:'10px', height:'10px', borderRadius:'50%', background: col }));
           $goto.remove();
         });
         $table.data('fgPolished',1);
-      }
-    });
-  });
-    }
-
-    // Patch Options UI (non-destructive): hide three checkboxes + Plan farms, set default group to All, add credits
-    var $opt = $('.optionsContent');
-    if ($opt.length){
-      // Hide checkboxes
-      $opt.find('.optionLosses').closest('label').hide();
-      $opt.find('.optionMaxloot').closest('label').hide();
-      $opt.find('.optionNewbarbs').closest('label').hide();
-      // Hide Plan farms button
-      $opt.find('.optionButton').hide();
-      // Focus Trim if Plan farms was focused by init
-      var $tb = $opt.find('.trimButton'); if ($tb.length) { try { $tb[0].focus(); } catch(_){} }
-      // Credits bottom-right
-      if (!$opt.find('.fg-credit').length){
-        $opt.append('<div class="fg-credit" style="text-align:right;margin-top:6px;opacity:.75">By Siolinio</div>');
-      }
-      // Default group: All (value=0 or text="all")
-      var $sel = $opt.find('.optionGroup');
-      if ($sel.length && !$sel.data('fg_set_all')){
-        var selected=false;
-        if ($sel.find('option[value="0"]').length){ $sel.val('0'); selected=true; }
-        else {
-          var $al = $sel.find('option').filter(function(){ return $(this).text().trim().toLowerCase()==='all'; }).first();
-          if ($al.length){ $sel.val($al.val()); selected=true; }
-        }
-        if (selected){
-          $sel.data('fg_set_all',1);
-          try {
-            var st = JSON.parse(localStorage.getItem('farmGod_options')||'{}');
-            st.optionGroup = parseInt($sel.val(),10) || 0;
-            localStorage.setItem('farmGod_options', JSON.stringify(st));
-          } catch(_){ }
-        }
-      }
-    }
-  }');
-        var group = parseInt(opts.optionGroup||0,10);
-        var distance = parseFloat(opts.optionDistance||25);
-        $('.optionsContent').html(UI.Throbber[0].outerHTML + '<br><br>');
-        runNewBarbsWith(group, distance);
       });
-    }
+    } catch(e){ /* quiet */ }
   }
 
-  // Observe for Options dialog openings and inject our button reliably
-  try {
-    var mo = new MutationObserver(function(){ injectAddButton(); });
-    mo.observe(document.body, { childList:true, subtree:true });
-  } catch(_) { setInterval(injectAddButton, 500); }
-
-  // ------- data fetchers (independent from Part 2 internals) -------
+  // =====================================================
+  // New Barbs core (data + render + actions)
+  // =====================================================
   function fetchVillagesAndPools(group){
     var url = TribalWars.buildURL('GET', 'overview_villages', { 'mode':'combined', 'group': group });
-    var data = {}; // coord -> {id,name,pool:{unit:count}}
+    var data = {};
     function parse($html){
       $html.find('#combined_table').find('.row_a, .row_b').filter(function(){ return $(this).find('.bonus_icon_33').length==0; }).each(function(){
         var $el=$(this); var $q=$el.find('.quickedit-label').first(); var coord=coordOf($q.text()); if(!coord) return;
         var pool={};
         if ($('#mobileHeader').length){
-          game_data.units.forEach(function(u){ var $cell=$el.find('img[src*="unit/unit_'+u+'"]').closest('td'); var val=$cell.length?$cell.text().replace(/\D+/g,''):0; pool[u]=toNumber(val); });
+          for (var i=0;i<game_data.units.length;i++){ var u=game_data.units[i]; var $cell=$el.find('img[src*="unit/unit_'+u+'"]').closest('td'); var txt=$cell.length?$cell.text().replace(/\D+/g,''):'0'; pool[u]=toNumber(txt); }
         } else {
           var units = game_data.units.slice();
           $el.find('.unit-item').each(function(i,td){ pool[units[i]] = toNumber($(td).text()); });
@@ -1246,7 +1217,7 @@ window.FarmGod.Main = (function (Library, Translation) {
 
   function fetchCommands(){
     var url = TribalWars.buildURL('GET', 'overview_villages', { 'mode':'commands', 'type':'attack' });
-    var cmds = {}; // coord -> true (has attack)
+    var cmds = {};
     function parse($html){
       $html.find('#commands_table').find('.row_a, .row_ax, .row_b, .row_bx').each(function(){
         var c = coordOf($(this).find('.quickedit-label').first().text()); if(c) cmds[c]=true;
@@ -1257,14 +1228,9 @@ window.FarmGod.Main = (function (Library, Translation) {
 
   function fetchPlunderCoords(){
     var url = TribalWars.buildURL('GET', 'am_farm');
-    var set = {}; // coord -> true present in plunder
-    var templates = {}; // 'a'/'b' -> {id, unitsByName}
+    var set = {}; var templates = {};
     function parse($html){
-      // plunder coords
-      $html.find('#plunder_list').find('tr[id^="village_"]').each(function(){
-        var coord = coordOf($(this).find('a[href*="screen=report&mode=all&view="]').first().text()); if(coord) set[coord]=true; });
-      // templates
-      var unitSpeeds = {}; // unused here, but keep structure similar
+      $html.find('#plunder_list').find('tr[id^="village_"]').each(function(){ var coord = coordOf($(this).find('a[href*="screen=report&mode=all&view="]').first().text()); if(coord) set[coord]=true; });
       $html.find('form[action*="action=edit_all"]').find('input[type="hidden"][name*="template"]').closest('tr').each(function(){
         var $row=$(this); var cls=$row.prev('tr').find('a.farm_icon').first().attr('class')||''; var m=cls.match(/farm_icon_(.*)\s/); if(!m) return; var key=m[1];
         var inputs=$row.find('input[type="text"], input[type="number"]');
@@ -1278,7 +1244,7 @@ window.FarmGod.Main = (function (Library, Translation) {
 
   function fetchNewBarbCoords(){
     return twLib.get('/map/village.txt').then(function(txt){
-      var lines = String(txt).match(/[^\r\n]+/g)||[]; var arr=[]; // {coord, id}
+      var lines = String(txt).match(/[^\r\n]+/g)||[]; var arr=[];
       for (var i=0;i<lines.length;i++){
         var p=lines[i].split(','); var id=p[0], x=p[2], y=p[3], player=p[4]; if (player==0){ arr.push({ coord: x+'|'+y, id: toNumber(id) }); }
       }
@@ -1286,13 +1252,13 @@ window.FarmGod.Main = (function (Library, Translation) {
     });
   }
 
-  // pick template: B if present else A
-  function chooseTemplate(templates){ return templates['b'] ? { key:'b', tpl:templates['b'] } : (templates['a'] ? { key:'a', tpl:templates['a'] } : null); }
-  function poolSatisfies(pool, needByName){ for (var u in needByName){ if(!needByName.hasOwnProperty(u)) continue; var req=needByName[u]||0; if(req>0 && (pool[u]||0) < req) return false; } return true; }
+  function chooseTemplate(templates){
+    if (templates['b']) return { key:'b', tpl:templates['b'] };
+    if (templates['a']) return { key:'a', tpl:templates['a'] };
+    return null;
+  }
 
-  // Build New Barbs view
   function runNewBarbsWith(group, maxDist){
-    // Parallel fetch
     Promise.all([
       fetchVillagesAndPools(group),
       fetchCommands(),
@@ -1304,13 +1270,14 @@ window.FarmGod.Main = (function (Library, Translation) {
       if (!pick){ UI.ErrorMessage('Farm Assistant templates not found'); Dialog.close(); return; }
       var needByName = pick.tpl.unitsByName || {}; var tplId = pick.tpl.id; var tplLetter = pick.key.toUpperCase();
 
-      // Filter: only barbs NOT in plunder list
-      var candidates = newBarbs.filter(function(v){ return !present[v.coord]; });
+      // Only barbs not already on plunder
+      var candidates = [];
+      for (var i=0;i<newBarbs.length;i++){ var v=newBarbs[i]; if (!present[v.coord]) candidates.push(v); }
 
-      // De-dup: per target, choose closest origin that has availability & no existing command
-      var best = {}; // tCoord -> {fields, origin}
-      candidates.forEach(function(t){
-        if (commands[t.coord]) return; // skip targets already under attack
+      // For each target, pick closest origin with availability and no existing command
+      var best = {}; // tCoord -> {fields, origin...}
+      for (var j=0;j<candidates.length;j++){
+        var t=candidates[j]; if (commands[t.coord]) continue;
         for (var oCoord in villages){
           var origin = villages[oCoord];
           if (!poolSatisfies(origin.pool||{}, needByName)) continue;
@@ -1319,14 +1286,12 @@ window.FarmGod.Main = (function (Library, Translation) {
           var prev = best[t.coord];
           if (!prev || dist < prev.fields){ best[t.coord] = { fields: dist, targetId: t.id, originCoord:oCoord, originId:origin.id, originName:origin.name }; }
         }
-      });
+      }
 
-      // Group by origin for UI
       var out={};
-      Object.keys(best).forEach(function(tc){ var b=best[tc]; if(!out[b.originCoord]) out[b.originCoord]=[]; out[b.originCoord].push({ origin:{id:b.originId,name:b.originName,coord:b.originCoord}, target:{coord:tc,id:b.targetId}, fields:b.fields }); });
-      for (var oc in out){ out[oc].sort(function(a,b){ return a.fields-b.fields; }); }
+      for (var tc in best){ if(!best.hasOwnProperty(tc)) continue; var b=best[tc]; if(!out[b.originCoord]) out[b.originCoord]=[]; out[b.originCoord].push({ origin:{id:b.originId,name:b.originName,coord:b.originCoord}, target:{coord:tc,id:b.targetId}, fields:b.fields }); }
+      for (var oc in out){ if(!out.hasOwnProperty(oc)) continue; out[oc].sort(function(a,b){ return a.fields-b.fields; }); }
 
-      // Render table
       Dialog.close();
       $('.farmGodContent').remove();
       $('#am_widget_Farm').first().before(buildNewBarbsTable(out, tplLetter, tplId));
@@ -1335,78 +1300,105 @@ window.FarmGod.Main = (function (Library, Translation) {
   }
 
   function buildNewBarbsTable(list, tplLetter, tplId){
-    var count=0; for (var oc in list){ count += list[oc].length; }
-    var html='\
-      <div class="farmGodContent">\
-        <h3>New Barbs (map-only) — Sending with Template '+tplLetter+'</h3>\
-        <div style="margin:6px 0 8px 0;opacity:.85">New barbs found: '+count+'</div>\
-        <div style="margin-bottom:8px">\
-          <button class="btn rebuildNewBarbs">Rebuild New Barbs</button>\
-          <small style="opacity:.7;margin-left:8px">Uses Farm Assistant Template '+tplLetter+' automatically.</small>\
-        </div>\
-        <table class="vis">\
-          <thead>\
-            <tr>\
-              <th>Origin</th>\
-              <th>Target</th>\
-              <th>fields</th>\
-              <th>Color</th>\
-              <th>Go to</th>\
-              <th>Send</th>\
-            </tr>\
-          </thead>\
-          <tbody>';
+    var count=0; for (var oc in list){ if(!list.hasOwnProperty(oc)) continue; count += list[oc].length; }
+    var htmlParts=[];
+    htmlParts.push('<div class="farmGodContent">');
+    htmlParts.push('<h3>New Barbs (map-only) — Sending with Template '+tplLetter+'</h3>');
+    htmlParts.push('<div style="margin:6px 0 8px 0;opacity:.85">New barbs found: '+count+'</div>');
+    htmlParts.push('<div style="margin-bottom:8px"><button class="btn rebuildNewBarbs">Rebuild New Barbs</button><small style="opacity:.7;margin-left:8px">Uses Farm Assistant Template '+tplLetter+' automatically.</small></div>');
+    htmlParts.push('<table class="vis"><thead><tr><th>Origin</th><th>Target</th><th>fields</th><th>Color</th><th>Go to</th><th>Send</th></tr></thead><tbody>');
     var rows=0;
-    for (var oc in list){ list[oc].forEach(function(v){
+    for (var oc2 in list){ if(!list.hasOwnProperty(oc2)) continue; var arr=list[oc2]; for (var k=0;k<arr.length;k++){ var v=arr[k];
       var originInfo=game_data.link_base_pure+'info_village&id='+v.origin.id;
       var targetInfo=game_data.link_base_pure+'info_village&id='+v.target.id;
-      html+='\
-        <tr class="farmRow">\
-          <td>'+v.origin.name+' ('+v.origin.coord+')</td>\
-          <td>'+v.target.coord+'</td>\
-          <td>'+v.fields.toFixed(2)+'</td>\
-          <td>NEW</td>\
-          <td><a href="'+originInfo+'" target="_blank">Go to '+v.origin.name+'</a> | <a href="'+targetInfo+'" target="_blank">Go to '+v.target.coord+'</a></td>\
-          <td><a href="#" class="nb_send" data-origin="'+v.origin.id+'" data-target="'+v.target.id+'" data-template="'+tplId+'">Send '+tplLetter+'</a></td>\
-        </tr>';
-      rows++; }); }
-    if(!rows) html+='<tr><td colspan="6" class="center">No new barbs within settings.</td></tr>';
-    html+='</tbody></table></div>';
-    return html;
+      htmlParts.push('<tr class="farmRow">');
+      htmlParts.push('<td>'+v.origin.name+' ('+v.origin.coord+')</td>');
+      htmlParts.push('<td>'+v.target.coord+'</td>');
+      htmlParts.push('<td>'+v.fields.toFixed(2)+'</td>');
+      htmlParts.push('<td>NEW</td>');
+      htmlParts.push('<td><a href="'+originInfo+'" target="_blank">Go to '+v.origin.name+'</a> | <a href="'+targetInfo+'" target="_blank">Go to '+v.target.coord+'</a></td>');
+      htmlParts.push('<td><a href="#" class="nb_send" data-origin="'+v.origin.id+'" data-target="'+v.target.id+'" data-template="'+tplId+'">Send '+tplLetter+'</a></td>');
+      htmlParts.push('</tr>');
+      rows++; }}
+    if(!rows) htmlParts.push('<tr><td colspan="6" class="center">No new barbs within settings.</td></tr>');
+    htmlParts.push('</tbody></table></div>');
+    return htmlParts.join('');
   }
 
   function wireNewBarbsHandlers(){
-    // Enter (capture-phase) — if first nb_send exists, consume the event before Trim handler
-    function onKeyDownCapture(ev){
-      var code = ev.keyCode||ev.which; if(code!==13) return;
-      var el = document.querySelector('.nb_send');
-      if (el){ ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation(); el.click(); }
-    }
-    // remove previous capture if any
-    try { document.removeEventListener('keydown', onKeyDownCapture, true); } catch(_){}
+    // ENTER (capture) -> first nb_send
+    function onKeyDownCapture(ev){ var code = ev.keyCode||ev.which; if(code!==13) return; var el = document.querySelector('.nb_send'); if (el){ ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation(); el.click(); } }
+    try { document.removeEventListener('keydown', onKeyDownCapture, true); } catch(_){ }
     document.addEventListener('keydown', onKeyDownCapture, true);
 
-    // Click handler: send via Account Manager
+    // Click send
     $('.nb_send').off('click').on('click', function(e){
       e.preventDefault();
       var $a=$(this);
       var origin=$a.data('origin'); var target=$a.data('target'); var tpl=$a.data('template');
       if (!origin || !target || !tpl){ UI.ErrorMessage('Missing template or ids'); return; }
       var url = Accountmanager.send_units_link.replace(/village=(\d+)/, 'village='+origin);
-      TribalWars.post(url, null, { target: target, template_id: tpl, source: origin }, function(r){
-        UI.SuccessMessage(r && r.success ? r.success : 'Sent');
-        $a.closest('tr').remove();
-      }, function(err){ UI.ErrorMessage(err || 'Error: farm not sent!'); $a.closest('tr').remove(); });
+      TribalWars.post(url, null, { target: target, template_id: tpl, source: origin }, function(r){ UI.SuccessMessage(r && r.success ? r.success : 'Sent'); $a.closest('tr').remove(); }, function(err){ UI.ErrorMessage(err || 'Error: farm not sent!'); $a.closest('tr').remove(); });
     });
 
-    // Rebuild button
-    $('.rebuildNewBarbs').off('click').on('click', function(){
-      var opts = JSON.parse(localStorage.getItem('farmGod_options')||'{}');
-      runNewBarbsWith(parseInt(opts.optionGroup||0,10), parseFloat(opts.optionDistance||25));
-    });
+    // Rebuild
+    $('.rebuildNewBarbs').off('click').on('click', function(){ var opts = JSON.parse(localStorage.getItem('farmGod_options')||'{}'); runNewBarbsWith(parseInt(opts.optionGroup||0,10), parseFloat(opts.optionDistance||25)); });
   }
+
+  // ---- Bootstrap observers once ----
+  if (!window.FarmGod.__nb_obs){ window.FarmGod.__nb_obs = true; safeObserver(function(){ enhanceOptionsUI(); polishTrimTable(); }); }
 
   // expose (optional)
   NewBarbs.run = runNewBarbsWith;
 
 })(window.FarmGod.NewBarbs = window.FarmGod.NewBarbs || {});
+
+
+// === Additions: New Barbs typewriter loader + list polish (non-destructive) ===
+(function(){
+  'use strict';
+  function getThIdx($table, name){
+    var idx=-1; $table.find('thead th').each(function(i){ if ($(this).text().trim().toLowerCase()===name) idx=i; });
+    return idx;
+  }
+  function polishNewBarbsTable(){
+    var $wraps = $('.farmGodContent'); if(!$wraps.length) return;
+    $wraps.each(function(){
+      var $box=$(this); var $h=$box.find('> h3').first(); if(!$h.length) return;
+      if ($h.text().toLowerCase().indexOf('new barbs')===-1) return;
+      var $table = $box.find('table.vis').first(); if(!$table.length || $table.data('fgPolishedNB')) return;
+      var idxOrigin=getThIdx($table,'origin');
+      var idxTarget=getThIdx($table,'target');
+      var idxFields=getThIdx($table,'fields'); // keep as-is
+      var idxColor=getThIdx($table,'color');
+      var idxGoTo=getThIdx($table,'go to');
+      $table.find('tbody tr').each(function(){
+        var $tr=$(this); var $td=$tr.children('td'); if(!$td.length) return;
+        if (idxGoTo>=0 && $td.length>idxGoTo){
+          var $goto=$td.eq(idxGoTo); var $links=$goto.find('a');
+          var originHref=$links.eq(0).attr('href'); var targetHref=$links.eq(1).attr('href');
+          if (idxOrigin>=0 && $td.length>idxOrigin && originHref){ var originText=$td.eq(idxOrigin).text(); $td.eq(idxOrigin).empty().append($('<a></a>').attr({href:originHref,target:'_blank'}).text(originText)); }
+          if (idxTarget>=0 && $td.length>idxTarget && targetHref){ var targetText=$td.eq(idxTarget).text(); $td.eq(idxTarget).empty().append($('<a></a>').attr({href:targetHref,target:'_blank'}).text(targetText)); }
+        }
+        if (idxColor>=0 && $td.length>idxColor){ $td.eq(idxColor).empty().append($('<span></span>').attr('title','NEW').css({display:'inline-block',width:'10px',height:'10px',borderRadius:'50%',background:'#2f6fdb'})); }
+        if (idxGoTo>=0 && $td.length>idxGoTo){ $td.eq(idxGoTo).remove(); }
+      });
+      if (idxGoTo>=0){ $table.find('thead th').eq(idxGoTo).remove(); }
+      $table.data('fgPolishedNB',1);
+    });
+  }
+  function typewriterForNewBarbsLoader(){
+    var $opt=$('.optionsContent'); if(!$opt.length) return;
+    if (!(window.FarmGod && window.FarmGod.__lastAction==='newbarbs')) return;
+    if ($opt.find('.fg-typing').length) return;
+    var htmlNow=String($opt.html()||'').toLowerCase();
+    if (htmlNow.indexOf('throbber')===-1 && htmlNow.indexOf('<img')===-1) return;
+    var $wrap=$('<div class="fg-typing"></div>').css({display:'flex',alignItems:'center',gap:'10px',padding:'6px 2px'});
+    if (window.UI && UI.Throbber && UI.Throbber.length){ var $spin=$(UI.Throbber[0].outerHTML); $wrap.append($spin); }
+    var $type=$('<span class="fg-type"></span>').css({fontFamily:'monospace',whiteSpace:'pre',lineHeight:1.4});
+    $wrap.append($type); $opt.append($wrap);
+    (function(){ var i=0,msg=' Siolinio did it again........'; var tm=setInterval(function(){ $type.text(msg.slice(0, ++i)); if(i>=msg.length) clearInterval(tm); },60); })();
+  }
+  try{ var mo2=new MutationObserver(function(){ polishNewBarbsTable(); typewriterForNewBarbsLoader(); }); mo2.observe(document.body,{childList:true,subtree:true}); }
+  catch(_){ setInterval(function(){ polishNewBarbsTable(); typewriterForNewBarbsLoader(); },500); }
+})();
