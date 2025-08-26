@@ -1402,3 +1402,134 @@ window.FarmGod.Main = (function (Library, Translation) {
   try{ var mo2=new MutationObserver(function(){ polishNewBarbsTable(); typewriterForNewBarbsLoader(); }); mo2.observe(document.body,{childList:true,subtree:true}); }
   catch(_){ setInterval(function(){ polishNewBarbsTable(); typewriterForNewBarbsLoader(); },500); }
 })();
+/*
+ * SiolFarm — inline UI rebrand & polish (drop‑in block)
+ * Safe to append at the **end** of your existing SiolFarm.js from the repo.
+ *
+ * What it does (UI only):
+ *  - Rebrand Options title → "SiolFarm Options"
+ *  - Single‑column spacing & soft styling (padding/margins/rounded)
+ *  - Default group selector to **All** (value 0 or option text "All"), persisted in farmGod_options
+ *  - Optional header typewriter/progressive effect (non‑blocking)
+ *
+ * No changes to logic (Trim/New Barbs/Enter/AutoClose etc.).
+ *
+ * Configure visual effect with:  window.SF_EFFECTS = 'minimal' | 'typewriter' | 'progressive'
+ * Default is 'typewriter'.
+ */
+(function(){
+  'use strict';
+
+  // ---- Config
+  var EFFECT = (window.SF_EFFECTS || 'typewriter'); // 'minimal' | 'typewriter' | 'progressive'
+
+  // ---- Helpers
+  function ensureStyle(){
+    if (document.querySelector('style.sf_ui_style')) return;
+    var css = ''+
+      '.optionsContent{max-width:780px}\n'+
+      '.optionsContent>*{margin:10px 0!important}\n'+
+      '.optionsContent h3{font-size:18px;margin-bottom:8px}\n'+
+      '.optionsContent .vis, .optionsContent .fg-card, .optionsContent table.vis{border:1px solid #c8c0a8;border-radius:10px;background:#f7f3e7;padding:10px}\n'+
+      '.optionsContent .fg-row{display:grid;grid-template-columns:140px 1fr 64px;align-items:center;gap:10px;margin:6px 0}\n'+
+      '.optionsContent input[type="range"]{width:100%}\n'+
+      '.optionsContent input[type="number"]{width:64px;text-align:center}\n'+
+      '.optionsContent .btn, .optionsContent button{padding:6px 12px;border-radius:8px}\n'+
+      '.optionsContent .trimButton{background:#d4a657;border:1px solid #a27b34;color:#1b1206}\n'+
+      '.optionsContent .newbarbsButton{background:#6aa0e6;border:1px solid #3d6fb8;color:#0b1b2d}\n'+
+      '.optionsContent .optionButton{background:#ddd;border:1px solid #aaa}\n'+
+      '.optionsContent .sf-credit{text-align:right;font-size:12px;opacity:.75}\n'+
+      '.optionsContent .sf-fade{opacity:0;transform:translateY(4px);transition:opacity .18s ease, transform .18s ease}\n'+
+      '.optionsContent .sf-fade.sf-in{opacity:1;transform:none}\n';
+    var tag = document.createElement('style');
+    tag.className = 'sf_ui_style';
+    tag.textContent = css;
+    document.head.appendChild(tag);
+  }
+
+  function typewriterTitle($h3, text){
+    try {
+      if (!$h3 || !$h3.length) return;
+      var node = $h3[0];
+      var i = 0; node.textContent = '';
+      var tm = setInterval(function(){
+        node.textContent = text.slice(0, ++i);
+        if (i >= text.length) clearInterval(tm);
+      }, 60);
+    } catch(_){}
+  }
+
+  function progressiveReveal($opt){
+    try{
+      var kids = Array.prototype.slice.call($opt.children());
+      for (var i=0;i<kids.length;i++){
+        var el = kids[i];
+        if (el.tagName && el.tagName.toLowerCase()==='h3') continue;
+        el.classList.add('sf-fade');
+        (function(e, idx){ setTimeout(function(){ e.classList.add('sf-in'); }, 120+idx*90); })(el, i);
+      }
+    }catch(_){}
+  }
+
+  function setGroupDefaultAll($sel){
+    try {
+      if (!$sel || !$sel.length) return;
+      var changed = false;
+      if ($sel.find('option[value="0"]').length){ $sel.val('0'); changed = true; }
+      else {
+        var opts = $sel.find('option');
+        for (var i=0;i<opts.length;i++){
+          var t = (opts[i].textContent||'').trim().toLowerCase();
+          if (t === 'all'){ $sel.val(opts[i].value); changed = true; break; }
+        }
+      }
+      if (changed){
+        try{
+          var st = JSON.parse(localStorage.getItem('farmGod_options')||'{}');
+          st.optionGroup = parseInt($sel.val(),10) || 0;
+          localStorage.setItem('farmGod_options', JSON.stringify(st));
+        }catch(_){}
+      }
+    } catch(_){}
+  }
+
+  function applyOnce(){
+    var $opt = window.jQuery ? window.jQuery('.optionsContent') : null;
+    if (!$opt || !$opt.length) return;
+    if ($opt.data('sf_ui_applied')) return;
+    $opt.data('sf_ui_applied', 1);
+
+    ensureStyle();
+
+    // Rebrand title
+    var $h3 = $opt.find('h3').first();
+    if ($h3.length){
+      var newTitle = 'SiolFarm Options';
+      if (EFFECT === 'typewriter') typewriterTitle($h3, newTitle); else $h3.text(newTitle);
+    }
+
+    // Default group => All
+    var $sel = $opt.find('.optionGroup');
+    if ($sel.length) setGroupDefaultAll($sel);
+
+    // Credits
+    if (!$opt.find('.sf-credit').length){
+      var div = document.createElement('div');
+      div.className = 'sf-credit';
+      div.textContent = 'By Siolinio';
+      $opt[0].appendChild(div);
+    }
+
+    // Progressive (optional, non‑blocking)
+    if (EFFECT === 'progressive') progressiveReveal($opt[0] ? window.jQuery($opt[0]) : $opt);
+  }
+
+  // ---- Bootstrap: run now and watch for dialog
+  try { applyOnce(); } catch(_){}
+  try {
+    var mo = new MutationObserver(function(){ applyOnce(); });
+    mo.observe(document.body, { childList:true, subtree:true });
+  } catch(_) {
+    setInterval(applyOnce, 400);
+  }
+})();
