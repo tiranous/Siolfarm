@@ -1533,3 +1533,212 @@ window.FarmGod.Main = (function (Library, Translation) {
     setInterval(applyOnce, 400);
   }
 })();
+/*
+ * SiolFarm — inline UI rebrand & polish (drop‑in block)
+ * Safe to append at the **end** of your existing SiolFarm.js from the repo.
+ *
+ * What it does (UI only):
+ *  - Rebrand Options title → "SiolFarm Options"
+ *  - Single‑column spacing & soft styling (padding/margins/rounded)
+ *  - Default group selector to **All** (value 0 or option text "All"), persisted in farmGod_options
+ *  - Optional header typewriter/progressive effect (non‑blocking)
+ *
+ * No changes to logic (Trim/New Barbs/Enter/AutoClose etc.).
+ *
+ * Configure visual effect with:  window.SF_EFFECTS = 'minimal' | 'typewriter' | 'progressive'
+ * Default is 'typewriter'.
+ */
+(function(){
+  'use strict';
+
+  // ---- Config
+  var EFFECT = (window.SF_EFFECTS || 'typewriter'); // 'minimal' | 'typewriter' | 'progressive'
+
+  // ---- Helpers
+  function ensureStyle(){
+    if (document.querySelector('style.sf_ui_style')) return;
+    var css = ''+
+      '.optionsContent{max-width:780px}\n'+
+      '.optionsContent>*{margin:10px 0!important}\n'+
+      '.optionsContent h3{font-size:18px;margin-bottom:8px}\n'+
+      '.optionsContent .vis, .optionsContent .fg-card, .optionsContent table.vis{border:1px solid #c8c0a8;border-radius:10px;background:#f7f3e7;padding:10px}\n'+
+      '.optionsContent .fg-row{display:grid;grid-template-columns:140px 1fr 64px;align-items:center;gap:10px;margin:6px 0}\n'+
+      '.optionsContent input[type="range"]{width:100%}\n'+
+      '.optionsContent input[type="number"]{width:64px;text-align:center}\n'+
+      '.optionsContent .btn, .optionsContent button{padding:6px 12px;border-radius:8px}\n'+
+      '.optionsContent .trimButton{background:#d4a657;border:1px solid #a27b34;color:#1b1206}\n'+
+      '.optionsContent .newbarbsButton{background:#6aa0e6;border:1px solid #3d6fb8;color:#0b1b2d}\n'+
+      '.optionsContent .optionButton{background:#ddd;border:1px solid #aaa}\n'+
+      '.optionsContent .sf-credit{text-align:right;font-size:12px;opacity:.75}\n'+
+      '.optionsContent .sf-fade{opacity:0;transform:translateY(4px);transition:opacity .18s ease, transform .18s ease}\n'+
+      '.optionsContent .sf-fade.sf-in{opacity:1;transform:none}\n';
+    var tag = document.createElement('style');
+    tag.className = 'sf_ui_style';
+    tag.textContent = css;
+    document.head.appendChild(tag);
+  }
+
+  function typewriterTitle($h3, text){
+    try {
+      if (!$h3 || !$h3.length) return;
+      var node = $h3[0];
+      var i = 0; node.textContent = '';
+      var tm = setInterval(function(){
+        node.textContent = text.slice(0, ++i);
+        if (i >= text.length) clearInterval(tm);
+      }, 60);
+    } catch(_){}
+  }
+
+  function progressiveReveal($opt){
+    try{
+      var kids = Array.prototype.slice.call($opt.children());
+      for (var i=0;i<kids.length;i++){
+        var el = kids[i];
+        if (el.tagName && el.tagName.toLowerCase()==='h3') continue;
+        el.classList.add('sf-fade');
+        (function(e, idx){ setTimeout(function(){ e.classList.add('sf-in'); }, 120+idx*90); })(el, i);
+      }
+    }catch(_){}
+  }
+
+  function setGroupDefaultAll($sel){
+    try {
+      if (!$sel || !$sel.length) return;
+      var changed = false;
+      if ($sel.find('option[value="0"]').length){ $sel.val('0'); changed = true; }
+      else {
+        var opts = $sel.find('option');
+        for (var i=0;i<opts.length;i++){
+          var t = (opts[i].textContent||'').trim().toLowerCase();
+          if (t === 'all'){ $sel.val(opts[i].value); changed = true; break; }
+        }
+      }
+      if (changed){
+        try{
+          var st = JSON.parse(localStorage.getItem('farmGod_options')||'{}');
+          st.optionGroup = parseInt($sel.val(),10) || 0;
+          localStorage.setItem('farmGod_options', JSON.stringify(st));
+        }catch(_){}
+      }
+    } catch(_){}
+  }
+
+  function applyOnce(){
+    var $opt = window.jQuery ? window.jQuery('.optionsContent') : null;
+    if (!$opt || !$opt.length) return;
+    if ($opt.data('sf_ui_applied')) return;
+    $opt.data('sf_ui_applied', 1);
+
+    ensureStyle();
+
+    // Rebrand title
+    var $h3 = $opt.find('h3').first();
+    if ($h3.length){
+      var newTitle = 'SiolFarm Options';
+      if (EFFECT === 'typewriter') typewriterTitle($h3, newTitle); else $h3.text(newTitle);
+    }
+
+    // Default group => All
+    var $sel = $opt.find('.optionGroup');
+    if ($sel.length) setGroupDefaultAll($sel);
+
+    // Credits
+    if (!$opt.find('.sf-credit').length){
+      var div = document.createElement('div');
+      div.className = 'sf-credit';
+      div.textContent = 'By Siolinio';
+      $opt[0].appendChild(div);
+    }
+
+    // Progressive (optional, non‑blocking)
+    if (EFFECT === 'progressive') progressiveReveal($opt[0] ? window.jQuery($opt[0]) : $opt);
+  }
+
+  // ---- Bootstrap: run now and watch for dialog
+  try { applyOnce(); } catch(_){}
+  try {
+    var mo = new MutationObserver(function(){ applyOnce(); });
+    mo.observe(document.body, { childList:true, subtree:true });
+  } catch(_) {
+    setInterval(applyOnce, 400);
+  }
+})();
+
+
+/* === SiolFarm — Rally page: Scouts optional clamp (non‑destructive) ===
+ * If "Scouts optional" is enabled in Options (sf_flags.scoutOpt=true),
+ * then on the Rally/Place screen we clamp the requested Scouts to the
+ * available count. If available is 0, we set 0 even if prefill asked for 1.
+ * Works with any prefill source (Trim, presets, manual). No other logic touched.
+ */
+(function(){
+  'use strict';
+  try{ if (!window.game_data || window.game_data.screen !== 'place') return; }catch(_){ return; }
+
+  function loadFlags(){
+    try{ var f=JSON.parse(localStorage.getItem('sf_flags')||'{}'); return { scoutOpt: (f.scoutOpt!==false) }; }catch(_){ return { scoutOpt:true }; }
+  }
+  function q(sel){ try{ return document.querySelector(sel); }catch(_){ return null; } }
+  function qAll(sel){ try{ return document.querySelectorAll(sel); }catch(_){ return []; } }
+  function digits(str){ var s=String(str||''), out=''; for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); if (c>=48 && c<=57) out+=s[i]; } return out; }
+
+  function parseAvailSpy(){
+    // 1) Parse from onclick="insertUnit('spy', N)"
+    var as = qAll('a[onclick],button[onclick]');
+    for (var i=0;i<as.length;i++){
+      var oc = as[i].getAttribute('onclick')||'';
+      if (oc.indexOf('insertUnit')>=0 && oc.indexOf('spy')>=0){
+        var start = oc.indexOf(',', oc.indexOf('spy'));
+        if (start>=0){
+          var num='';
+          for (var k=start+1;k<oc.length;k++){
+            var ch=oc.charCodeAt(k);
+            if (ch>=48 && ch<=57) num+=oc[k];
+            else if (num.length>0) break;
+          }
+          if (num){ var n=parseInt(num,10); if (isFinite(n)) return n; }
+        }
+      }
+    }
+    // 2) From data-count or text near unit_link
+    var cands = qAll('a.unit_link[data-unit="spy"], a[data-unit="spy"]');
+    for (var j=0;j<cands.length;j++){
+      var v = cands[j].getAttribute('data-count') || cands[j].textContent || '';
+      var n2 = parseInt(digits(v),10); if (isFinite(n2)) return n2;
+    }
+    // 3) Fallback: look around spy icon
+    var img = q('img[src*="unit_spy"], img.unit_spy');
+    if (img){
+      var txt=''; var p=img.parentElement; var hops=0;
+      while (p && hops++<4){ txt+=' '+(p.textContent||''); p=p.nextElementSibling; }
+      var n3 = parseInt(digits(txt),10); if (isFinite(n3)) return n3;
+    }
+    return null;
+  }
+
+  function clampSpy(){
+    var flags = loadFlags(); if (!flags.scoutOpt) return;
+    var input = q('#unit_input_spy, input[name="spy"], input[name="unit_spy"]');
+    if (!input) return;
+    var want = parseInt(input.value||'0',10); if (!isFinite(want)) want=0;
+    var avail = parseAvailSpy();
+    if (avail===0){ input.value='0'; return; }
+    if (avail!==null && want>avail){ input.value=String(avail); }
+  }
+
+  // initial + interactions
+  try{ clampSpy(); }catch(_){ }
+  document.addEventListener('click', function(ev){
+    var a = ev.target.closest ? ev.target.closest('a,button') : null; if (!a) return;
+    var oc = a.getAttribute('onclick')||'';
+    if (oc.indexOf('insertUnit(')>=0 || (a.className||'').indexOf('farm_icon')>=0 || (a.className||'').indexOf('template')>=0){
+      setTimeout(clampSpy,0); setTimeout(clampSpy,120); setTimeout(clampSpy,300);
+    }
+  }, true);
+  document.addEventListener('input', function(ev){
+    var el=ev.target; if (!el) return;
+    if (el.id==='unit_input_spy' || el.name==='spy' || el.name==='unit_spy') setTimeout(clampSpy,0);
+  }, true);
+  try{ var mo=new MutationObserver(function(){ clampSpy(); }); mo.observe(document.body,{childList:true,subtree:true}); }catch(_){ setInterval(clampSpy,500); }
+})();
