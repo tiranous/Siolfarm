@@ -1666,82 +1666,122 @@ window.FarmGod.Main = (function (Library, Translation) {
 })();
 
 
-/* === SiolFarm — Rally page: Scouts optional clamp (non‑destructive) ===
- * If "Scouts optional" is enabled in Options (sf_flags.scoutOpt=true),
- * then on the Rally/Place screen we clamp the requested Scouts to the
- * available count. If available is 0, we set 0 even if prefill asked for 1.
- * Works with any prefill source (Trim, presets, manual). No other logic touched.
+/* === SiolFarm — Scouts optional clamp v3 (0-or-1) ===
+ * If Options → "Scouts optional" is enabled:
+ *   - if requested spy > 0 and available == 0 → set 0
+ *   - if requested spy > 0 and available  > 0 → set 1
+ *   - if requested spy == 0                → keep 0
+ * Robust availability detection across different HTML variants.
  */
 (function(){
   'use strict';
-  try{ if (!window.game_data || window.game_data.screen !== 'place') return; }catch(_){ return; }
+  if (window.__siolfarm_spyClamp_v3) return;
+  window.__siolfarm_spyClamp_v3 = true;
 
-  function loadFlags(){
-    try{ var f=JSON.parse(localStorage.getItem('sf_flags')||'{}'); return { scoutOpt: (f.scoutOpt!==false) }; }catch(_){ return { scoutOpt:true }; }
-  }
+  try { if (!window.game_data || window.game_data.screen !== 'place') return; } catch(_) { return; }
+
+  function flags(){ try{ var f=JSON.parse(localStorage.getItem('sf_flags')||'{}'); return { scoutOpt: (f.scoutOpt!==false) }; }catch(_){ return { scoutOpt:true }; } }
   function q(sel){ try{ return document.querySelector(sel); }catch(_){ return null; } }
   function qAll(sel){ try{ return document.querySelectorAll(sel); }catch(_){ return []; } }
-  function digits(str){ var s=String(str||''), out=''; for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); if (c>=48 && c<=57) out+=s[i]; } return out; }
+  function onlyDigits(str){ var s=String(str||''), out=''; for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); if(c>=48&&c<=57) out+=s[i]; } return out; }
 
-  function parseAvailSpy(){
-    // 1) Parse from onclick="insertUnit('spy', N)"
+  function getSpyInput(){
+    return q('#unit_input_spy') || q('input[name="spy"]') || q('input[name="unit_spy"]');
+  }
+
+  // Try multiple sources to get available spies
+  function getAvailableSpy(){
+    // 0) direct "all spies" label (common)
+    var el = q('#units_entry_all_spy, .units-entry-all#units_entry_all_spy, .units-entry-all[data-unit="spy"]');
+    if (el){
+      var n = parseInt(onlyDigits(el.textContent),10); if (isFinite(n)) return n;
+      var d = el.getAttribute('data-count'); if (d){ var n2=parseInt(d,10); if (isFinite(n2)) return n2; }
+    }
+    // 1) unit_link data-count
+    var link = q('a.unit_link[data-unit="spy"], a[data-unit="spy"]');
+    if (link){
+      var d2 = link.getAttribute('data-count'); if (d2){ var n3=parseInt(d2,10); if (isFinite(n3)) return n3; }
+      var t2 = link.textContent; var n4=parseInt(onlyDigits(t2),10); if (isFinite(n4)) return n4;
+    }
+    // 2) insertUnit('spy', N) in onclick
     var as = qAll('a[onclick],button[onclick]');
     for (var i=0;i<as.length;i++){
       var oc = as[i].getAttribute('onclick')||'';
       if (oc.indexOf('insertUnit')>=0 && oc.indexOf('spy')>=0){
+        var m = oc.match(/insertUnit\\(['"]spy['"]\\s*,\\s*(\\d+)\\)/);
+        if (m){ var n5=parseInt(m[1],10); if (isFinite(n5)) return n5; }
+        // fallback manual scan after comma
         var start = oc.indexOf(',', oc.indexOf('spy'));
         if (start>=0){
-          var num='';
-          for (var k=start+1;k<oc.length;k++){
-            var ch=oc.charCodeAt(k);
-            if (ch>=48 && ch<=57) num+=oc[k];
-            else if (num.length>0) break;
-          }
-          if (num){ var n=parseInt(num,10); if (isFinite(n)) return n; }
+          var num=''; for (var k=start+1;k<oc.length;k++){ var ch=oc.charCodeAt(k); if(ch>=48&&ch<=57) num+=oc[k]; else if(num) break; }
+          if (num){ var n6=parseInt(num,10); if (isFinite(n6)) return n6; }
         }
       }
     }
-    // 2) From data-count or text near unit_link
-    var cands = qAll('a.unit_link[data-unit="spy"], a[data-unit="spy"]');
-    for (var j=0;j<cands.length;j++){
-      var v = cands[j].getAttribute('data-count') || cands[j].textContent || '';
-      var n2 = parseInt(digits(v),10); if (isFinite(n2)) return n2;
+    // 3) try to read "(N)" near the input
+    var inp = getSpyInput();
+    if (inp){
+      var box = inp.closest ? inp.closest('div,td,li') : inp.parentElement;
+      var hops=0, cur=box;
+      while (cur && hops++<4){
+        var txt = cur.textContent || '';
+        var m2 = txt.match(/\\((\\d[\\d\\.,]*)\\)/);
+        if (m2){ var v = parseInt(onlyDigits(m2[1]),10); if (isFinite(v)) return v; }
+        cur = cur.nextElementSibling;
+      }
     }
-    // 3) Fallback: look around spy icon
-    var img = q('img[src*="unit_spy"], img.unit_spy');
-    if (img){
-      var txt=''; var p=img.parentElement; var hops=0;
-      while (p && hops++<4){ txt+=' '+(p.textContent||''); p=p.nextElementSibling; }
-      var n3 = parseInt(digits(txt),10); if (isFinite(n3)) return n3;
-    }
+    // unknown
     return null;
   }
 
-  function clampSpy(){
-    var flags = loadFlags(); if (!flags.scoutOpt) return;
-    var input = q('#unit_input_spy, input[name="spy"], input[name="unit_spy"]');
-    if (!input) return;
+  function clamp(){
+    if (!flags().scoutOpt) return;
+    var input = getSpyInput(); if (!input) return;
+
     var want = parseInt(input.value||'0',10); if (!isFinite(want)) want=0;
-    var avail = parseAvailSpy();
-    if (avail===0){ input.value='0'; return; }
-    if (avail!==null && want>avail){ input.value=String(avail); }
+    if (want<=0) return; // user asked 0 → leave it
+
+    var avail = getAvailableSpy();
+    if (avail === 0){ input.value = '0'; return; }
+    if (avail === null){
+      // unknown availability — safest behavior: if user asked >0, force 1
+      input.value = '1'; return;
+    }
+    // avail > 0 and user wants >0 → force 1
+    input.value = '1';
   }
 
-  // initial + interactions
-  try{ clampSpy(); }catch(_){ }
+  // Run now and on interactions that likely change numbers
+  try { clamp(); } catch(_){}
+
   document.addEventListener('click', function(ev){
-    var a = ev.target.closest ? ev.target.closest('a,button') : null; if (!a) return;
-    var oc = a.getAttribute('onclick')||'';
-    if (oc.indexOf('insertUnit(')>=0 || (a.className||'').indexOf('farm_icon')>=0 || (a.className||'').indexOf('template')>=0){
-      setTimeout(clampSpy,0); setTimeout(clampSpy,120); setTimeout(clampSpy,300);
+    var a = ev.target && ev.target.closest ? ev.target.closest('a,button') : null;
+    if (!a) return;
+    var oc = (a.getAttribute && a.getAttribute('onclick')) || '';
+    var cls = a.className || '';
+    if (oc.indexOf('insertUnit(')>=0 || cls.indexOf('farm_icon')>=0 || cls.indexOf('template')>=0 || cls.indexOf('unit_link')>=0){
+      setTimeout(clamp, 0);
+      setTimeout(clamp, 120);
+      setTimeout(clamp, 300);
     }
   }, true);
+
   document.addEventListener('input', function(ev){
-    var el=ev.target; if (!el) return;
-    if (el.id==='unit_input_spy' || el.name==='spy' || el.name==='unit_spy') setTimeout(clampSpy,0);
+    var el = ev.target;
+    if (!el) return;
+    if (el === getSpyInput()){
+      setTimeout(clamp, 0);
+    }
   }, true);
-  try{ var mo=new MutationObserver(function(){ clampSpy(); }); mo.observe(document.body,{childList:true,subtree:true}); }catch(_){ setInterval(clampSpy,500); }
+
+  try{
+    var mo = new MutationObserver(function(){ clamp(); });
+    mo.observe(document.body, { childList:true, subtree:true });
+  }catch(_){
+    setInterval(clamp, 500);
+  }
 })();
+
 /* === SiolFarm – Advanced Trim Filters (UI + Post-filter) ===
  * Προσθέτει 3 checkboxes στο Options:
  *  - Skip targets already under any attack
