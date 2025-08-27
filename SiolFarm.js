@@ -1742,3 +1742,109 @@ window.FarmGod.Main = (function (Library, Translation) {
   }, true);
   try{ var mo=new MutationObserver(function(){ clampSpy(); }); mo.observe(document.body,{childList:true,subtree:true}); }catch(_){ setInterval(clampSpy,500); }
 })();
+/* === SiolFarm – Advanced Trim Filters (UI + Post-filter) ===
+ * Προσθέτει 3 checkboxes στο Options:
+ *  - Skip targets already under any attack
+ *  - Skip targets attacked by SiolFarm (ram-only, last 30m)
+ *  - Scouts optional (allow 0 if unavailable)
+ *
+ * ΜΗ καταστροφικό: κολλάει πάνω από το υπάρχον script. Επικόλλησέ το στο ΤΕΛΟΣ του SiolFarm.js.
+ */
+(function(){
+  'use strict';
+  var FLAGS_KEY='sf_flags';
+  function loadFlags(){
+    try{
+      var f=JSON.parse(localStorage.getItem(FLAGS_KEY)||'{}');
+      return { skipAny: !!f.skipAny, skipBySf: !!f.skipBySf, scoutOpt: (f.scoutOpt!==false) };
+    }catch(_){ return { skipAny:true, skipBySf:false, scoutOpt:true }; }
+  }
+  function saveFlags(f){ try{ localStorage.setItem(FLAGS_KEY, JSON.stringify(f)); }catch(_){ } }
+
+  function injectFlagsUI(){
+    var $opt=window.jQuery?window.jQuery('.optionsContent'):null;
+    if(!$opt||!$opt.length) return;
+    if ($opt.find('.sf-adv-filters').length) return;
+
+    var f=loadFlags();
+    var $row=window.jQuery('<div class="sf-adv-filters"></div>').css({
+      border:'1px solid #c8c0a8',borderRadius:'10px',background:'#f7f3e7',padding:'8px',marginTop:'6px'
+    });
+    $row.append('<div style="font-weight:700;margin-bottom:4px">Advanced Trim Filters</div>');
+    var $a=window.jQuery('<label style="display:block;margin:4px 0"><input type="checkbox" class="sf-flag-any"> Skip targets already under <b>any</b> attack</label>');
+    var $b=window.jQuery('<label style="display:block;margin:4px 0"><input type="checkbox" class="sf-flag-sf"> Skip targets attacked <b>by SiolFarm</b> (ram-only, last 30m)</label>');
+    var $c=window.jQuery('<label style="display:block;margin:4px 0"><input type="checkbox" class="sf-flag-scout"> Scouts optional (allow 0 if unavailable)</label>');
+    $row.append($a,$b,$c);
+
+    var $anchor=$opt.find('.fg-card').first(); // κάτω από το “Trim setup”
+    if($anchor.length){ $anchor.after($row); } else { $opt.append($row); }
+
+    $row.find('.sf-flag-any').prop('checked', f.skipAny);
+    $row.find('.sf-flag-sf').prop('checked', f.skipBySf);
+    $row.find('.sf-flag-scout').prop('checked', f.scoutOpt);
+    $row.on('change','input',function(){
+      saveFlags({
+        skipAny: $row.find('.sf-flag-any').prop('checked'),
+        skipBySf: $row.find('.sf-flag-sf').prop('checked'),
+        scoutOpt: $row.find('.sf-flag-scout').prop('checked')
+      });
+    });
+  }
+
+  function withinSfLog(coord){
+    try{
+      var list=JSON.parse(localStorage.getItem('sf_attack_log')||'[]');
+      var now=(Date.now()/1000|0);
+      for(var i=list.length-1;i>=0;i--){
+        var it=list[i];
+        if(it.coord===coord && it.ramOnly && (now-it.ts)<=1800) return true; // 30'
+      }
+      return false;
+    }catch(_){ return false; }
+  }
+
+  function fetchCommandsQuick(cb){
+    try{
+      var url=TribalWars.buildURL('GET','overview_villages',{mode:'commands',type:'attack'});
+      window.$.get(url).done(function(html){
+        var $h=window.jQuery(html); var map={};
+        $h.find('#commands_table').find('.row_a, .row_ax, .row_b, .row_bx').each(function(){
+          var c=(window.jQuery(this).find('.quickedit-label').first().text().match(/\d{1,3}\|\d{1,3}/)||[null])[0];
+          if(c) map[c]=true;
+        });
+        cb(map);
+      }).fail(function(){ cb({}); });
+    }catch(_){ cb({}); }
+  }
+
+  function applyTrimFilters(){
+    var f=loadFlags(); if(!f.skipAny && !f.skipBySf) return;
+
+    var $boxes=window.jQuery?window.jQuery('.farmGodContent'):null; if(!$boxes||!$boxes.length) return;
+    var $wrap=null;
+    $boxes.each(function(){ var $h=window.jQuery(this).find('> h3').first(); if($h.length && /Trim/i.test($h.text())) $wrap=window.jQuery(this); });
+    if(!$wrap||!$wrap.length) return;
+
+    var $rows=$wrap.find('tbody tr'); if(!$rows.length) return;
+
+    function doFilter(commands){
+      $rows.each(function(){
+        var $tr=window.jQuery(this); var $td=$tr.children('td'); if($td.length<2) return;
+        var tcoord=window.jQuery.trim($td.eq(1).text());
+        if (f.skipAny && commands[tcoord]) { $tr.remove(); return; }
+        if (f.skipBySf && withinSfLog(tcoord)) { $tr.remove(); return; }
+      });
+    }
+
+    if (f.skipAny){ fetchCommandsQuick(function(cmds){ doFilter(cmds||{}); }); }
+    else { doFilter({}); }
+  }
+
+  function runPass(){ try{ injectFlagsUI(); applyTrimFilters(); }catch(_){ } }
+
+  // Παρακολούθηση DOM (Options/Trim ανοίγουν δυναμικά)
+  try{
+    var mo=new MutationObserver(function(){ runPass(); });
+    mo.observe(document.body,{childList:true,subtree:true});
+  }catch(_){ setInterval(runPass, 500); }
+})();
